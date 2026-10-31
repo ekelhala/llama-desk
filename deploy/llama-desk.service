@@ -1,0 +1,21 @@
+[Unit]
+Description=llama-desk model and process manager
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/models
+
+[Service]
+Type=simple
+User=emil
+Group=emil
+WorkingDirectory=/home/emil
+ExecStartPre=/usr/bin/mountpoint -q /srv/models
+ExecStart=/home/emil/.local/bin/llama-desk --models /srv/models/gguf --llama-server /home/emil/llama.cpp/build/bin/llama-server --data /home/emil/.local/share/llama-desk --listen 127.0.0.1:8090
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

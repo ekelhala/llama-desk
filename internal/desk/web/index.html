@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>llama-desk</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><span class="mark">ll.</span><div><h1>llama-desk</h1><p>Your models. Your server.</p></div></div><span id="connection" class="badge">Connecting</span></header>
+<main>
+<div class="intro"><h2>A little room for your models.</h2><p>Download a GGUF, pick your settings, and run it.</p></div>
+<div id="error" role="alert" hidden></div>
+<details class="settings"><summary>Storage & executable</summary><dl id="settings"></dl><p>Set these when starting llama-desk with <code>--models</code>, <code>--llama-server</code>, and <code>--downloads</code>.</p></details>
+<section><div class="section-head"><h2><span>01</span> Downloads</h2><span id="download-count" class="subtle"></span></div>
+<form id="download-form"><label for="urls">Hugging Face file URLs</label><div class="download-input"><textarea id="urls" rows="2" required placeholder="https://huggingface.co/owner/repo/resolve/main/model.gguf&#10;One URL per line"></textarea><button type="submit">Download <span>↓</span></button></div><p class="hint">Paste exact GGUF download links. Transfers run in parallel. For split models, add every shard.</p></form>
+<div id="downloads"></div></section>
+<section><div class="section-head"><h2><span>02</span> Models</h2><span id="model-count" class="subtle"></span></div><div id="models"></div></section>
+<section><div class="section-head"><h2><span>03</span> Servers</h2><span id="run-count" class="subtle"></span></div><div id="runs"></div></section>
+<footer>Native llama.cpp processes · No authentication · Put behind Pangolin</footer>
+</main>
+<dialog id="launch-dialog"><form id="launch-form"><div class="section-head"><h2>Run model</h2><button class="quiet" type="button" id="close-dialog">Close ✕</button></div><p id="launch-model" class="filename"></p><input type="hidden" id="model-path">
+<div class="fields"><label>Context size<input id="context" type="number" value="8192" min="1" required></label><label>GPU layers<input id="gpu" type="number" value="99" min="0" required></label><label>Port<input id="port" type="number" value="8080" min="1024" max="65535" required></label></div>
+<label>Extra arguments <span class="hint">One argument per line, including values. No shell quoting.</span><textarea id="args" rows="4" placeholder="--parallel&#10;1&#10;--jinja"></textarea></label>
+<label>Environment variables <span class="hint">One NAME=value per line</span><textarea id="env" rows="3" placeholder="CUDA_VISIBLE_DEVICES=0"></textarea></label>
+<label>Command preview<pre id="preview"></pre></label><p class="hint">Settings are remembered per model. The server listens on 127.0.0.1. Its API has no authentication.</p><button type="submit" class="wide">Start llama-server →</button></form></dialog>
+<dialog id="inspect-dialog"><div class="section-head"><h2 id="inspect-title">Details</h2><button type="button" id="close-inspect" class="quiet">Close ✕</button></div><pre id="inspect-body"></pre></dialog>
+</body></html>
