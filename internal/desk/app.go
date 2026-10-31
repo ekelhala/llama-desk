@@ -159,7 +159,9 @@ func (a *App) Handler() http.Handler {
 	for _, endpoint := range []string{"chat/completions", "completions", "embeddings", "responses"} {
 		mux.HandleFunc("POST /v1/"+endpoint, a.proxyInference)
 	}
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
+	health := func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) }
+	mux.HandleFunc("GET /healthz", health)
+	mux.HandleFunc("GET /health", health) // Compatible with an existing Pangolin Manager health target.
 	web, _ := fs.Sub(assets, "web")
 	mux.Handle("/", http.FileServer(http.FS(web)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

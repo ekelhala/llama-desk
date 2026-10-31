@@ -241,7 +241,12 @@ func (a *App) transfer(ctx context.Context, j *Job) error {
 	}
 	defer root.Close()
 	relative := filepath.FromSlash(j.File)
-	if err = root.MkdirAll(filepath.Dir(relative), 0750); err != nil {
+	// Workers commonly share repository directories. Serialize mkdir operations:
+	// os.Root.MkdirAll can return EEXIST when another worker creates a parent.
+	a.mu.Lock()
+	err = root.MkdirAll(filepath.Dir(relative), 0750)
+	a.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	if _, err = root.Stat(relative); !os.IsNotExist(err) {
