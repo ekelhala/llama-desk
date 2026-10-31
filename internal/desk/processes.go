@@ -8,15 +8,18 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 type Launch struct {
+	Name      string            `json:"name"`
 	Model     string            `json:"model"`
 	Context   int               `json:"context"`
 	GPULayers int               `json:"gpu_layers"`
@@ -34,6 +37,7 @@ type Run struct {
 	Ended   *time.Time `json:"ended,omitempty"`
 	Error   string     `json:"error,omitempty"`
 	stop    context.CancelFunc
+	ctx     context.Context
 	log     *logBuffer
 }
 type logBuffer struct {
@@ -73,14 +77,26 @@ func (a *App) launch(w http.ResponseWriter, r *http.Request) {
 		fail(w, errors.New("context must be positive and GPU layers nonnegative"))
 		return
 	}
+	spec.Name = strings.TrimSpace(spec.Name)
+	if spec.Name == "" {
+		spec.Name = strings.TrimSuffix(filepath.Base(spec.Model), filepath.Ext(spec.Model))
+	}
+	if spec.Name == "" || strings.Contains(spec.Name, ",") || strings.IndexFunc(spec.Name, unicode.IsControl) >= 0 || len(spec.Name) > 256 {
+		fail(w, errors.New("model name must be at most 256 characters and cannot contain commas or control characters"))
+		return
+	}
 	for _, run := range a.runs {
 		if (run.Status == "running" || run.Status == "stopping") && run.Launch.Port == spec.Port {
 			fail(w, errors.New("that port is already used by a managed server"))
 			return
 		}
+		if (run.Status == "running" || run.Status == "stopping") && run.Launch.Name == spec.Name {
+			fail(w, errors.New("that model name is already used by a managed server"))
+			return
+		}
 	}
 	// These arguments belong to the manager so health checks and displayed model stay accurate.
-	blocked := map[string]bool{"-m": true, "--model": true, "--host": true, "--port": true, "-hf": true, "--hf-repo": true, "--models-preset": true, "--models-dir": true}
+	blocked := map[string]bool{"-m": true, "--model": true, "-a": true, "--alias": true, "--host": true, "--port": true, "-hf": true, "--hf-repo": true, "--models-preset": true, "--models-dir": true}
 	for _, arg := range spec.Args {
 		if blocked[strings.SplitN(arg, "=", 2)[0]] {
 			fail(w, fmt.Errorf("%s is managed by llama-desk", arg))
@@ -99,7 +115,7 @@ func (a *App) launch(w http.ResponseWriter, r *http.Request) {
 	}
 	args := []string{"--model", model, "--ctx-size", strconv.Itoa(spec.Context), "--n-gpu-layers", strconv.Itoa(spec.GPULayers)}
 	args = append(args, spec.Args...)
-	args = append(args, "--host", "127.0.0.1", "--port", strconv.Itoa(spec.Port))
+	args = append(args, "--alias", spec.Name, "--host", "127.0.0.1", "--port", strconv.Itoa(spec.Port))
 	ctx, stop := context.WithCancel(a.ctx)
 	cmd := exec.CommandContext(ctx, a.binary, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -124,7 +140,7 @@ func (a *App) launch(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		cmd.Env = append(cmd.Env, k+"="+env[k])
 	}
-	run := &Run{ID: id(), Launch: spec, Command: append([]string{a.binary}, args...), Status: "running", Started: time.Now(), stop: stop, log: &logBuffer{}}
+	run := &Run{ID: id(), Launch: spec, Command: append([]string{a.binary}, args...), Status: "running", Started: time.Now(), stop: stop, ctx: ctx, log: &logBuffer{}}
 	cmd.Stdout = run.log
 	cmd.Stderr = run.log
 	if err = cmd.Start(); err != nil {

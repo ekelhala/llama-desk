@@ -15,6 +15,7 @@
 <footer>Native llama.cpp processes · No authentication · Put behind Pangolin</footer>
 </main>
 <dialog id="launch-dialog"><form id="launch-form"><div class="section-head"><h2>Run model</h2><button class="quiet" type="button" id="close-dialog">Close ✕</button></div><p id="launch-model" class="filename"></p><input type="hidden" id="model-path">
+<label>API model name<input id="name" required maxlength="256" placeholder="qwen3.8-27b"><span class="hint">The name clients send through LiteLLM. Keep it stable when changing server ports.</span></label>
 <div class="fields"><label>Context size<input id="context" type="number" value="8192" min="1" required></label><label>GPU layers<input id="gpu" type="number" value="99" min="0" required></label><label>Port<input id="port" type="number" value="8080" min="1024" max="65535" required></label></div>
 <label>Extra arguments <span class="hint">One argument per line, including values. No shell quoting.</span><textarea id="args" rows="4" placeholder="--parallel&#10;1&#10;--jinja"></textarea></label>
 <label>Environment variables <span class="hint">One NAME=value per line</span><textarea id="env" rows="3" placeholder="CUDA_VISIBLE_DEVICES=0"></textarea></label>

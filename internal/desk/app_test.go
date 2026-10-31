@@ -162,6 +162,13 @@ func TestProcessLifecycleAndSavedProfile(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
 		t.Fatal(err)
 	}
+	if run.Launch.Name != "test" || !strings.Contains(strings.Join(run.Command, " "), "--alias test") {
+		t.Fatalf("model name was not passed to native server: %+v", run)
+	}
+	duplicate := strings.Replace(body, `"port":18080`, `"port":18081`, 1)
+	if rec := request(t, a, "POST", "/api/runs", duplicate); rec.Code != 400 {
+		t.Fatalf("duplicate model name accepted: %s", rec.Body.String())
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		rec = request(t, a, "GET", "/api/runs/"+run.ID+"/logs", "")

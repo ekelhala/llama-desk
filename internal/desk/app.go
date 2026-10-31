@@ -40,6 +40,7 @@ type App struct {
 	workers              sync.WaitGroup
 	closeOnce            sync.Once
 	client               *http.Client
+	proxyTransport       *http.Transport
 }
 type savedState struct {
 	Jobs     map[string]*Job   `json:"jobs"`
@@ -70,6 +71,7 @@ func New(models, binary, data string, parallel int) (*App, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{models: models, binary: binary, data: data, jobs: map[string]*Job{}, runs: map[string]*Run{}, profiles: map[string]Launch{}, slots: make(chan struct{}, parallel), ctx: ctx, cancel: cancel, client: &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 30 * time.Second}}}
+	a.proxyTransport = &http.Transport{ResponseHeaderTimeout: 10 * time.Minute}
 	contents, err := os.ReadFile(filepath.Join(data, "state.json"))
 	if err == nil {
 		var state savedState
@@ -107,6 +109,7 @@ func (a *App) Close() {
 		}
 		a.mu.Unlock()
 		a.workers.Wait()
+		a.proxyTransport.CloseIdleConnections()
 	})
 }
 
@@ -152,13 +155,17 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/runs/{id}/logs", a.logs)
 	mux.HandleFunc("GET /api/runs/{id}/health", a.health)
 	mux.HandleFunc("DELETE /api/models", a.deleteModel)
+	mux.HandleFunc("GET /v1/models", a.proxyModels)
+	for _, endpoint := range []string{"chat/completions", "completions", "embeddings", "responses"} {
+		mux.HandleFunc("POST /v1/"+endpoint, a.proxyInference)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	web, _ := fs.Sub(assets, "web")
 	mux.Handle("/", http.FileServer(http.FS(web)))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'self'; base-uri 'none'")
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") {
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		if r.Method != "GET" && r.Method != "HEAD" {

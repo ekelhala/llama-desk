@@ -59,8 +59,58 @@ There is no shell evaluation. For example:
 
 Environment overrides use `NAME=value`, one per line, for example
 `CUDA_VISIBLE_DEVICES=GPU-9682481c-77d1-da9c-c6bc-0c8374984d36`.
-The model, host, and port are owned by the manager. Use arguments rather than
+The model, API alias, host, and port are owned by the manager. Use arguments rather than
 `LLAMA_ARG_*` variables. Managed inference processes bind to `127.0.0.1`.
+
+## One inference entry point for LiteLLM
+
+```text
+Client → LiteLLM (keys and policies) → llama-desk /v1 → selected llama-server
+```
+
+Set **API model name** in the launch form, for example `qwen3.8-27b`. It is saved
+with the model's launch settings and passed to the child with `--alias`. Active
+names must be unique. This name stays stable when you change the child's port.
+
+llama-desk exposes these routes on its normal listener (default port 8090):
+
+- `GET /v1/models`: model names for currently running managed processes.
+- `POST /v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and
+  `/v1/responses`: route by the JSON `model` field to a managed process.
+
+Requests preserve their JSON payload, including custom parameters. Responses,
+HTTP error statuses and SSE streaming pass through. A disconnected caller cancels
+the upstream request. The gateway's authorization headers and cookies are removed
+before forwarding to a child. There are no automatic retries of inference requests.
+Requests are limited to 32 MiB; the proxy waits up to ten minutes for response
+headers and does not impose a total stream duration.
+
+There is no implicit startup or fallback: start the desired model in the UI first.
+A stopped or unknown model returns an OpenAI-style HTTP 404; an unreachable child
+returns 502. A child that is still loading can return its own 503. Process names
+appear in `/v1/models` while loading; listing a model is not a readiness guarantee.
+Backend support determines whether a particular inference endpoint works.
+
+In LiteLLM, use the same API base for every local model route:
+
+```yaml
+model_list:
+  - model_name: qwen3.8-27b
+    litellm_params:
+      model: openai/qwen3.8-27b
+      api_base: http://127.0.0.1:8090/v1
+      api_key: local-llama-desk
+```
+
+The last value is a dummy provider key; llama-desk does not authenticate. Retain
+LiteLLM's existing database, client keys, and access controls. The deployed
+LiteLLM stack uses Linux host networking, so it can reach this loopback address.
+Changing or adding child servers no longer requires changing backend URLs in
+LiteLLM. Model names/access policies still need registration in LiteLLM; this
+proxy does not synchronize its model list into LiteLLM's database.
+
+This is the intended deployment path. Existing live LiteLLM routes remain unchanged
+until llama-desk is installed and starts owning the native inference processes.
 
 ## Deliberate scaffold boundaries
 
@@ -74,7 +124,7 @@ failed jobs expose the error and can be resumed manually.
 
 The server panel distinguishes process status from the explicit Health action.
 It does not yet collect GPU memory/temperature, slot activity, throughput, or
-persist server logs. No automatic routing, eviction, model loading, or LiteLLM
+persist server logs. No automatic eviction, model loading, or LiteLLM
 registration is performed. LiteLLM remains a separate gateway.
 
 A user-started server already on port 8080 is not adopted or controlled. Stop it
