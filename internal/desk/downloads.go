@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -29,8 +30,40 @@ type Job struct {
 	cancel         context.CancelFunc
 }
 
-// Keep the first scaffold specific: accept exact Hugging Face resolve URLs.
-// No arbitrary URL fetching, repository guessing, or automatic quantization selection.
+var repoPart = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// Build the file URLs on the server so users only need a repository and filenames.
+func repositoryURLs(repo, revision string, files []string) ([]string, error) {
+	parts := strings.Split(strings.TrimSpace(repo), "/")
+	if len(parts) != 2 || !repoPart.MatchString(parts[0]) || !repoPart.MatchString(parts[1]) {
+		return nil, errors.New("enter the Hugging Face repository as owner/name")
+	}
+	revision = strings.TrimSpace(revision)
+	if revision == "" {
+		revision = "main"
+	}
+	if !repoPart.MatchString(revision) {
+		return nil, errors.New("revision must be a branch name, tag or commit without slashes")
+	}
+	if len(files) < 1 || len(files) > 32 {
+		return nil, errors.New("provide between 1 and 32 filenames")
+	}
+	urls := make([]string, 0, len(files))
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" || strings.HasPrefix(file, "/") || strings.ContainsAny(file, "*?[]") {
+			return nil, errors.New("enter an exact GGUF filename, including any subdirectory")
+		}
+		u := url.URL{Scheme: "https", Host: "huggingface.co", Path: "/" + strings.Join(parts, "/") + "/resolve/" + revision + "/" + file}
+		if _, err := downloadTarget(u.String()); err != nil {
+			return nil, err
+		}
+		urls = append(urls, u.String())
+	}
+	return urls, nil
+}
+
+// Also validates URLs from previously saved jobs and older API clients.
 func downloadTarget(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -57,14 +90,29 @@ func downloadTarget(raw string) (string, error) {
 
 func (a *App) addDownload(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		URLs []string `json:"urls"`
+		Repo     string   `json:"repo"`
+		Files    []string `json:"files"`
+		Revision string   `json:"revision"`
+		URLs     []string `json:"urls"` // Compatibility with existing clients and saved jobs.
 	}
 	if err := decode(w, r, &input); err != nil {
 		fail(w, err)
 		return
 	}
+	if input.Repo != "" || len(input.Files) > 0 || input.Revision != "" {
+		if len(input.URLs) > 0 {
+			fail(w, errors.New("provide repo and files, or URLs, not both"))
+			return
+		}
+		var err error
+		input.URLs, err = repositoryURLs(input.Repo, input.Revision, input.Files)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+	}
 	if len(input.URLs) < 1 || len(input.URLs) > 32 {
-		fail(w, errors.New("provide between 1 and 32 URLs"))
+		fail(w, errors.New("provide a repository and at least one GGUF filename"))
 		return
 	}
 	a.mu.Lock()

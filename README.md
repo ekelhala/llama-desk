@@ -31,7 +31,9 @@ with custom arguments and environment variables.
 
 ## First working slice
 
-- **Downloads:** paste exact Hugging Face `/resolve/` GGUF URLs, one per line.
+- **Downloads:** enter a Hugging Face repository (`owner/name`) and a GGUF filename,
+  including any subdirectory. Enter multiple filenames on separate lines to queue
+  them together. Revision defaults to `main`, with an optional branch/tag/commit field.
   Bounded parallel transfers, byte progress, speed, cancel and resume. Downloads
   remain `.part` files until size/header checks pass. Resume uses ETag and
   If-Range; changed files restart from byte zero. Existing files are never replaced.
@@ -114,13 +116,25 @@ until llama-desk is installed and starts owning the native inference processes.
 
 ## Deliberate scaffold boundaries
 
-Downloads currently support public, exact GGUF file links. Add all shards for a
+Downloads currently support public repositories and exact GGUF filenames. Add all shards for a
 split model and launch the first one. For vision, download the projector and add
 `--mmproj` plus its absolute path as separate arguments. There is no Hugging Face
 browser, gated-repository credential handling, shard discovery, or upstream
 checksum verification yet. GGUF inspection currently shows filesystem metadata,
 not parsed architecture/tensor metadata. Downloads are not automatically retried;
 failed jobs expose the error and can be resumed manually.
+
+For example, enter repository `ggml-org/models` and filename
+`tinyllamas/stories260K.gguf`. The corresponding API request is:
+
+```sh
+curl http://127.0.0.1:8090/api/downloads \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"ggml-org/models","files":["tinyllamas/stories260K.gguf"]}'
+```
+
+The API also accepts an optional `revision` string. The earlier `urls` array is
+still accepted for compatibility; the web UI builds downloads from repo + filename.
 
 The server panel distinguishes process status from the explicit Health action.
 It does not yet collect GPU memory/temperature, slot activity, throughput, or

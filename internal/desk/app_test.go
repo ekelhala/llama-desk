@@ -83,6 +83,80 @@ func TestDownloadTargets(t *testing.T) {
 	}
 }
 
+func TestRepositoryDownloadInputs(t *testing.T) {
+	urls, err := repositoryURLs(" owner/repo ", "", []string{"model.gguf", "subfolder/model #1.gguf"})
+	if err != nil || len(urls) != 2 || urls[0] != "https://huggingface.co/owner/repo/resolve/main/model.gguf" || urls[1] != "https://huggingface.co/owner/repo/resolve/main/subfolder/model%20%231.gguf" {
+		t.Fatalf("bad repository URLs: %v %v", urls, err)
+	}
+	urls, err = repositoryURLs("owner/repo", "abc123", []string{"model.gguf"})
+	if err != nil || !strings.Contains(urls[0], "/resolve/abc123/") {
+		t.Fatalf("revision lost: %v %v", urls, err)
+	}
+	for _, input := range []struct {
+		repo, revision string
+		files          []string
+	}{
+		{"owner", "", []string{"model.gguf"}},
+		{"https://huggingface.co/owner/repo", "", []string{"model.gguf"}},
+		{"owner/../repo", "", []string{"model.gguf"}},
+		{"owner/repo", "", nil},
+		{"owner/repo", "", []string{"../model.gguf"}},
+		{"owner/repo", "", []string{"/model.gguf"}},
+		{"owner/repo", "", []string{"model*.gguf"}},
+		{"owner/repo", "", []string{"README.md"}},
+		{"owner/repo", "../main", []string{"model.gguf"}},
+	} {
+		if _, err := repositoryURLs(input.repo, input.revision, input.files); err == nil {
+			t.Fatalf("accepted invalid input: %+v", input)
+		}
+	}
+}
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDownloadAPIWithRepositoryAndFiles(t *testing.T) {
+	a := testApp(t, "unused")
+	a.client = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "huggingface.co" || !strings.HasPrefix(r.URL.Path, "/owner/repo/resolve/main/") {
+			t.Errorf("wrong download URL: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("GGUFtest")), ContentLength: 8}, nil
+	})}
+	rec := request(t, a, "POST", "/api/downloads", `{"repo":"owner/repo","files":["first.gguf","nested/second.gguf"]}`)
+	if rec.Code != 202 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	var jobs []Job
+	if err := json.Unmarshal(rec.Body.Bytes(), &jobs); err != nil || len(jobs) != 2 {
+		t.Fatalf("bad jobs: %s %v", rec.Body.String(), err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for _, job := range jobs {
+		for {
+			a.mu.Lock()
+			status, detail := a.jobs[job.ID].Status, a.jobs[job.ID].Error
+			a.mu.Unlock()
+			if status == "completed" {
+				break
+			}
+			if status == "failed" || time.Now().After(deadline) {
+				t.Fatalf("download %s: %s %s", job.File, status, detail)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		data, err := os.ReadFile(filepath.Join(a.models, filepath.FromSlash(job.File)))
+		if err != nil || string(data) != "GGUFtest" {
+			t.Fatalf("downloaded %q: %q %v", job.File, data, err)
+		}
+	}
+	rec = request(t, a, "POST", "/api/downloads", `{"repo":"owner/repo","files":["other.gguf"],"urls":["https://huggingface.co/owner/repo/resolve/main/other.gguf"]}`)
+	if rec.Code != 400 {
+		t.Fatal("accepted mixed URL and repository input")
+	}
+}
+
 func TestDownloadResumePublishesOnlyCompleteGGUF(t *testing.T) {
 	a := testApp(t, "unused")
 	content := []byte("GGUFmodel payload")
